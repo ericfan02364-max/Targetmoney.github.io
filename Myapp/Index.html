@@ -39,7 +39,6 @@
             filter: brightness(0.85); 
         }
         
-        /* 通用按下變暗效果 */
         .tap-dark:active { filter: brightness(0.9); }
         .tap-bg-dark:active { background-color: rgba(0,0,0,0.05); }
         
@@ -56,6 +55,10 @@
         .calendar-dot { width: 6px; height: 6px; background: var(--khaki-dark); border-radius: 50%; margin-top: 2px; }
         .safe-pt { padding-top: env(safe-area-inset-top); }
         .safe-pb { padding-bottom: env(safe-area-inset-bottom); }
+        
+        /* 自定義動畫 */
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body class="pb-24">
@@ -190,7 +193,7 @@
             </button>
         </div>
 
-        <!-- 客戶編輯彈窗 -->
+        <!-- 客戶編輯彈窗 (包含成交歷史) -->
         <div v-if="showClientModal" class="fixed inset-0 z-[60] bg-[#5D4037]/40 backdrop-blur-sm flex items-end">
             <div class="bg-[#FAF7F2] w-full rounded-t-[40px] p-8 max-h-[90vh] overflow-y-auto shadow-2xl border-t-4 border-[#B8977E]">
                 <div class="flex justify-between items-center mb-8">
@@ -198,6 +201,22 @@
                     <button @click="showClientModal = false" class="text-stone-300 text-3xl tap-dark">×</button>
                 </div>
                 
+                <!-- 成交歷史紀錄 (僅編輯時顯示) -->
+                <div v-if="editingClient.id && editingClient.deals && editingClient.deals.length" class="mb-6">
+                    <p class="text-[11px] font-black text-[#B8977E] mb-3 uppercase">📋 成交紀錄</p>
+                    <div class="space-y-2 max-h-40 overflow-y-auto pr-1">
+                        <div v-for="(deal, idx) in editingClient.deals" :key="idx" class="bg-white p-3 rounded-xl border border-stone-100 flex justify-between items-center text-xs">
+                            <div>
+                                <span class="font-bold text-stone-600">{{ deal.date }}</span>
+                                <span class="mx-2 text-stone-300">|</span>
+                                <span class="text-stone-500">金額 HK$ {{ deal.amount.toLocaleString() }}</span>
+                            </div>
+                            <span class="font-black text-[#B8977E]">佣金 ${{ deal.commission.toLocaleString() }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 新增成交表單 (僅編輯時顯示) -->
                 <div v-if="editingClient.id" class="bg-white border-2 border-[#E6D5B8] p-5 rounded-[30px] mb-8 shadow-sm">
                     <p class="text-[11px] font-black text-[#B8977E] mb-3 uppercase">💰 登錄新成交</p>
                     <div class="space-y-3">
@@ -212,6 +231,7 @@
                     </div>
                 </div>
 
+                <!-- 客戶基本資料 -->
                 <div class="space-y-4">
                     <div class="flex justify-center mb-4">
                         <label class="relative cursor-pointer group tap-dark">
@@ -310,17 +330,12 @@
                 const currentMonth = new Date().getMonth() + 1;
 
                 const formattedEventDate = computed(() => {
-                    const year = currentYear;
-                    const month = currentMonth;
-                    const day = newEvent.value.day;
-                    return `${year}年${month}月${day}日`;
+                    return `${currentYear}年${currentMonth}月${newEvent.value.day}日`;
                 });
 
                 const getCurrentTimeString = () => {
                     const now = new Date();
-                    const hours = String(now.getHours()).padStart(2, '0');
-                    const minutes = String(now.getMinutes()).padStart(2, '0');
-                    return `${hours}:${minutes}`;
+                    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
                 };
 
                 const getAvatarUrl = (client) => {
@@ -356,7 +371,16 @@
                 });
 
                 const openClientModal = (client = null) => {
-                    editingClient.value = client ? { ...client } : { name: '', age: '', gender: '', phone: '', background: '', photo: null };
+                    if (client) {
+                        // 深拷貝以確保不修改原對象
+                        editingClient.value = JSON.parse(JSON.stringify(client));
+                    } else {
+                        editingClient.value = { 
+                            name: '', age: '', gender: '', phone: '', background: '', 
+                            photo: null, 
+                            deals: [] 
+                        };
+                    }
                     showClientModal.value = true;
                     dealAmount.value = null;
                 };
@@ -365,18 +389,25 @@
                     const file = e.target.files[0];
                     if (file) {
                         const reader = new FileReader();
-                        reader.onload = (ev) => editingClient.value.photo = ev.target.result;
+                        reader.onload = (ev) => {
+                            editingClient.value.photo = ev.target.result;
+                        };
                         reader.readAsDataURL(file);
                     }
                 };
 
                 const saveClient = () => {
                     if (!editingClient.value.name) return;
+                    
                     if (editingClient.value.id) {
                         const index = clients.value.findIndex(c => c.id === editingClient.value.id);
-                        clients.value[index] = { ...editingClient.value };
+                        if (index !== -1) {
+                            // 確保 deals 數組保留
+                            clients.value[index] = { ...editingClient.value };
+                        }
                     } else {
                         editingClient.value.id = Date.now();
+                        editingClient.value.deals = editingClient.value.deals || [];
                         clients.value.push({ ...editingClient.value });
                     }
                     saveStorage();
@@ -392,14 +423,34 @@
                 };
 
                 const submitDeal = () => {
-                    if (!dealAmount.value) return;
+                    if (!dealAmount.value || !editingClient.value.id) return;
                     const commission = dealAmount.value * (dealRate.value / 100);
                     
-                    const oldMilestone = Math.floor(earnedCommission.value / 10000);
+                    // 新增成交記錄
+                    const newDeal = {
+                        date: new Date().toLocaleDateString('zh-HK'),
+                        amount: dealAmount.value,
+                        commission: commission
+                    };
+                    
+                    if (!editingClient.value.deals) {
+                        editingClient.value.deals = [];
+                    }
+                    editingClient.value.deals.push(newDeal);
+                    
+                    // 更新全局業績
                     earnedCommission.value += commission;
                     totalRevenue.value += dealAmount.value;
                     totalDeals.value += 1;
                     
+                    // 更新客戶資料到 clients 陣列
+                    const index = clients.value.findIndex(c => c.id === editingClient.value.id);
+                    if (index !== -1) {
+                        clients.value[index] = { ...editingClient.value };
+                    }
+                    
+                    // 慶祝動畫
+                    const oldMilestone = Math.floor((earnedCommission.value - commission) / 10000);
                     const newMilestone = Math.floor(earnedCommission.value / 10000);
                     if (newMilestone > oldMilestone) {
                         confetti({ 
@@ -409,8 +460,9 @@
                             colors: ['#B8977E', '#E6D5B8', '#F8E8E8']
                         });
                     }
+                    
                     saveStorage();
-                    showClientModal.value = false;
+                    dealAmount.value = null;
                 };
 
                 const openEventModal = () => {
@@ -465,7 +517,7 @@
                         totalRevenue: totalRevenue.value,
                         totalDeals: totalDeals.value,
                         totalMeetings: totalMeetings.value,
-                        clients: JSON.parse(JSON.stringify(clients.value)),
+                        clients: clients.value,
                         events: events.value
                     };
                     localStorage.setItem('lady_boss_data', JSON.stringify(data));
@@ -481,14 +533,21 @@
                 onMounted(() => {
                     const saved = localStorage.getItem('lady_boss_data');
                     if (saved) {
-                        const d = JSON.parse(saved);
-                        monthlyGoal.value = d.monthlyGoal || 88000;
-                        earnedCommission.value = d.earnedCommission || 0;
-                        totalRevenue.value = d.totalRevenue || 0;
-                        totalDeals.value = d.totalDeals || 0;
-                        totalMeetings.value = d.totalMeetings || 0;
-                        clients.value = d.clients || [];
-                        events.value = d.events || [];
+                        try {
+                            const d = JSON.parse(saved);
+                            monthlyGoal.value = d.monthlyGoal || 88000;
+                            earnedCommission.value = d.earnedCommission || 0;
+                            totalRevenue.value = d.totalRevenue || 0;
+                            totalDeals.value = d.totalDeals || 0;
+                            totalMeetings.value = d.totalMeetings || 0;
+                            clients.value = d.clients || [];
+                            events.value = d.events || [];
+                            
+                            // 確保每個客戶都有 deals 數組
+                            clients.value.forEach(c => { c.deals = c.deals || []; });
+                        } catch(e) {
+                            console.warn('讀取資料失敗，使用預設值');
+                        }
                     }
                 });
 
