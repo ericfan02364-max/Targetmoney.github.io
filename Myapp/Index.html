@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>My Goal Planner</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="https://img.icons8.com/bubbles/200/heart-outline.png">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    
+    <style>
+        :root {
+            --khaki-dark: #B8977E;
+            --khaki-light: #E6D5B8;
+            --cream: #FAF7F2;
+            --soft-pink: #F8E8E8;
+        }
+        body { 
+            -webkit-tap-highlight-color: transparent; 
+            background-color: var(--cream);
+            font-family: "PingFang HK", "Helvetica Neue", sans-serif;
+            color: #5D4037;
+        }
+        [v-cloak] { display: none; }
+        
+        /* 可愛圓潤按鈕與卡片 */
+        .bubble-card { border-radius: 30px; background: white; border: 2px solid #F0E6D2; box-shadow: 0 8px 0px #F0E6D2; }
+        .cute-btn { 
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            border-radius: 20px;
+            box-shadow: 0 4px 0px #A6866D;
+        }
+        .cute-btn:active { transform: translateY(3px); box-shadow: 0 1px 0px #A6866D; }
+        
+        /* 自定義滑動條 */
+        input[type=range] { -webkit-appearance: none; background: transparent; }
+        input[type=range]::-webkit-slider-runnable-track {
+            height: 12px; background: var(--khaki-light); border-radius: 10px;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 26px; width: 26px; border-radius: 50%;
+            background: var(--khaki-dark); border: 3px solid white; margin-top: -7px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .calendar-dot { width: 6px; height: 6px; background: var(--khaki-dark); border-radius: 50%; margin-top: 2px; }
+        .safe-pt { padding-top: env(safe-area-inset-top); }
+        .safe-pb { padding-bottom: env(safe-area-inset-bottom); }
+    </style>
+</head>
+<body class="pb-24">
+    <div id="app" v-cloak class="max-w-md mx-auto relative min-h-screen px-4">
+        
+        <div class="sticky top-0 z-40 bg-[#FAF7F2]/90 backdrop-blur-md pt-safe pb-4 flex justify-between items-center">
+            <div>
+                <p class="text-[10px] font-bold text-stone-400 tracking-widest uppercase">{{ formattedMonth }}</p>
+                <h1 class="text-2xl font-black text-[#5D4037]">{{ tabNames[currentTab] }}</h1>
+            </div>
+            <div class="w-10 h-10 rounded-full bg-white border-2 border-[#E6D5B8] flex items-center justify-center text-xl shadow-sm">
+                ✨
+            </div>
+        </div>
+
+        <div v-if="currentTab === 'home'" class="space-y-6 animate-fade-in">
+            <div class="bubble-card p-6 space-y-4">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="text-xs font-bold text-stone-400">距離目標還差</p>
+                        <p class="text-3xl font-black text-[#B8977E]">HK$ {{ remainingGoal.toLocaleString() }}</p>
+                    </div>
+                    <div class="bg-[#F8E8E8] px-3 py-1 rounded-full text-[10px] font-bold text-[#D4A5A5]">加油！</div>
+                </div>
+                
+                <input type="range" min="0" max="1000000" step="10000" v-model.number="monthlyGoal" class="w-full">
+                
+                <div class="flex justify-between text-[11px] font-bold text-stone-400">
+                    <span>目標: ${{ monthlyGoal.toLocaleString() }}</span>
+                    <span>已賺: ${{ earnedCommission.toLocaleString() }}</span>
+                </div>
+            </div>
+
+            <div class="bubble-card overflow-hidden">
+                <div class="p-4 border-b border-stone-100 flex justify-between items-center">
+                    <span class="font-black text-sm text-[#8D6E63]">🗓️ 我的行程表</span>
+                    <button @click="showEventModal = true" class="text-xs bg-[#B8977E] text-white px-3 py-1 rounded-full cute-btn font-bold">預約 +</button>
+                </div>
+                <div class="p-4">
+                    <div class="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-stone-300 mb-2">
+                        <div v-for="d in ['S','M','T','W','T','F','S']">{{d}}</div>
+                    </div>
+                    <div class="grid grid-cols-7 gap-1">
+                        <div v-for="e in firstDayOfMonth" class="h-10"></div>
+                        <div v-for="day in daysInMonth" 
+                             @click="selectedDate = day"
+                             class="h-10 flex flex-col items-center justify-center rounded-xl text-sm transition-all relative"
+                             :class="selectedDate === day ? 'bg-[#B8977E] text-white shadow-lg scale-110 z-10' : 'text-stone-600 hover:bg-stone-50'">
+                            {{ day }}
+                            <div v-if="checkEvent(day)" :class="selectedDate === day ? 'bg-white' : 'bg-[#B8977E]'" class="calendar-dot"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-[#FDFCF9] p-4 border-t border-stone-100 space-y-3">
+                    <p class="text-[10px] font-black text-stone-400 uppercase">Schedule · {{selectedDate}}日</p>
+                    <div v-if="getEventsByDate.length === 0" class="text-xs text-stone-300 italic py-2">今天沒有預約，休息一下吧 ☕</div>
+                    <div v-for="evt in getEventsByDate" class="flex items-center gap-3 p-3 bg-white rounded-2xl border border-stone-100 shadow-sm">
+                        <div class="text-[10px] font-black text-[#B8977E] w-10">{{evt.time}}</div>
+                        <div class="flex-1">
+                            <p class="text-xs font-bold">{{evt.title}}</p>
+                            <p class="text-[10px] text-stone-400">客戶: {{evt.clientName}}</p>
+                        </div>
+                        <div class="w-2 h-2 rounded-full bg-[#B8977E]"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="currentTab === 'clients'" class="space-y-4">
+            <div class="relative group">
+                <input v-model="searchQuery" type="text" placeholder="搜尋客戶姓名或電話..." class="w-full bg-white rounded-2xl p-4 shadow-sm border-2 border-transparent focus:border-[#E6D5B8] outline-none transition-all text-sm">
+                <span class="absolute right-4 top-4">🔍</span>
+            </div>
+            
+            <button @click="openClientModal()" class="w-full bg-[#B8977E] text-white font-black py-4 rounded-[25px] cute-btn flex items-center justify-center gap-2">
+                <span>✨</span> 錄入新成員
+            </button>
+
+            <div class="grid grid-cols-1 gap-3">
+                <div v-for="client in filteredClients" @click="openClientModal(client)" class="bubble-card p-4 flex items-center gap-4 active:scale-95 transition-transform">
+                    <div class="relative">
+                        <img :src="client.photo || 'https://img.icons8.com/bubbles/100/user-female-circle.png'" class="w-16 h-16 rounded-2xl object-cover bg-stone-100 border-2 border-[#FAF7F2]">
+                    </div>
+                    <div class="flex-1">
+                        <h4 class="font-black text-[#5D4037]">{{ client.name }}</h4>
+                        <p class="text-[11px] text-stone-400 font-medium">📞 {{ client.phone }}</p>
+                    </div>
+                    <div class="text-[#E6D5B8]">❯</div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="currentTab === 'stats'" class="space-y-6">
+            <div class="bubble-card p-6 text-center bg-[#B8977E] !border-none !box-shadow-none">
+                <p class="text-white/70 text-xs font-bold uppercase tracking-widest mb-1">Total Revenue</p>
+                <p class="text-4xl font-black text-white">HK$ {{ totalRevenue.toLocaleString() }}</p>
+                <div class="mt-4 flex justify-center">
+                    <select v-model="selectedYear" class="bg-white/20 text-white text-[10px] font-bold px-3 py-1 rounded-full outline-none backdrop-blur-md border border-white/30">
+                        <option v-for="y in [2024, 2025, 2026]" :value="y">{{y}} 年度</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div class="bubble-card p-5 text-center">
+                    <div class="w-10 h-10 bg-[#F8E8E8] rounded-full flex items-center justify-center mx-auto mb-2">🤝</div>
+                    <p class="text-[10px] font-bold text-stone-400">見客數量</p>
+                    <p class="text-2xl font-black text-[#5D4037]">{{ totalMeetings }}</p>
+                </div>
+                <div class="bubble-card p-5 text-center">
+                    <div class="w-10 h-10 bg-[#E8F4F8] rounded-full flex items-center justify-center mx-auto mb-2">📈</div>
+                    <p class="text-[10px] font-bold text-stone-400">成交率</p>
+                    <p class="text-2xl font-black text-[#5D4037]">{{ closeRate }}%</p>
+                </div>
+            </div>
+
+            <button @click="resetStats" class="w-full text-[10px] font-bold text-stone-300 uppercase tracking-widest mt-10">重置所有統計數據</button>
+        </div>
+
+        <div class="fixed bottom-6 left-6 right-6 h-20 bg-[#5D4037] rounded-[35px] shadow-2xl flex items-center justify-around px-2 z-50">
+            <button v-for="tab in ['home','clients','stats']" @click="currentTab = tab" 
+                    :class="currentTab === tab ? 'bg-white text-[#B8977E] scale-110' : 'text-white/50'" 
+                    class="flex flex-col items-center justify-center w-16 h-16 rounded-[28px] transition-all">
+                <span class="text-xl">{{ tab === 'home' ? '🏠' : tab === 'clients' ? '🎀' : '📊' }}</span>
+                <span class="text-[9px] font-black mt-1">{{ tabNames[tab] }}</span>
+            </button>
+        </div>
+
+        <div v-if="showClientModal" class="fixed inset-0 z-[60] bg-[#5D4037]/40 backdrop-blur-sm flex items-end">
+            <div class="bg-[#FAF7F2] w-full rounded-t-[40px] p-8 max-h-[90vh] overflow-y-auto shadow-2xl border-t-4 border-[#B8977E]">
+                <div class="flex justify-between items-center mb-8">
+                    <h2 class="text-xl font-black">{{ editingClient.id ? '會員資料' : '加入新成員' }}</h2>
+                    <button @click="showClientModal = false" class="text-stone-300 text-3xl">×</button>
+                </div>
+                
+                <div v-if="editingClient.id" class="bg-white border-2 border-[#E6D5B8] p-5 rounded-[30px] mb-8 shadow-sm">
+                    <p class="text-[11px] font-black text-[#B8977E] mb-3 uppercase">💰 登錄新成交</p>
+                    <div class="space-y-3">
+                        <input v-model.number="dealAmount" type="number" placeholder="輸入成交金額 (HK$)" class="w-full p-4 bg-stone-50 rounded-2xl text-sm outline-none">
+                        <div class="flex gap-2">
+                            <div class="flex-1 flex items-center bg-stone-50 rounded-2xl px-4">
+                                <span class="text-[10px] font-bold text-stone-400 mr-2">佣金%</span>
+                                <input v-model.number="dealRate" type="number" class="w-full bg-transparent py-4 text-sm outline-none">
+                            </div>
+                            <button @click="submitDeal" class="bg-[#B8977E] text-white px-8 rounded-2xl font-black text-sm cute-btn">登錄</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-4">
+                    <div class="flex justify-center mb-4">
+                        <label class="relative cursor-pointer group">
+                            <img :src="editingClient.photo || 'https://img.icons8.com/bubbles/100/user-female-circle.png'" class="w-28 h-28 rounded-[35px] object-cover border-4 border-white shadow-lg group-active:scale-95 transition">
+                            <div class="absolute -bottom-2 -right-2 bg-white w-10 h-10 rounded-full shadow-md flex items-center justify-center border border-stone-100 text-sm">📷</div>
+                            <input type="file" @change="uploadPhoto" class="hidden" accept="image/*">
+                        </label>
+                    </div>
+                    <input v-model="editingClient.name" placeholder="姓名" class="w-full p-4 rounded-2xl bg-white border border-stone-100 shadow-sm text-sm">
+                    <div class="flex gap-3">
+                        <input v-model="editingClient.age" placeholder="年齡" type="number" class="w-1/2 p-4 rounded-2xl bg-white border border-stone-100 shadow-sm text-sm">
+                        <select v-model="editingClient.gender" class="w-1/2 p-4 rounded-2xl bg-white border border-stone-100 shadow-sm text-sm">
+                            <option value="">性別</option><option value="男">男</option><option value="女">女</option>
+                        </select>
+                    </div>
+                    <input v-model="editingClient.phone" placeholder="電話號碼" class="w-full p-4 rounded-2xl bg-white border border-stone-100 shadow-sm text-sm">
+                    <textarea v-model="editingClient.background" placeholder="背景與偏好備註..." class="w-full p-4 rounded-2xl bg-white border border-stone-100 shadow-sm text-sm h-32"></textarea>
+                    
+                    <button @click="saveClient" class="w-full bg-[#5D4037] text-white font-black py-4 rounded-[25px] mt-4 cute-btn">儲存資料</button>
+                    <button v-if="editingClient.id" @click="deleteClient" class="w-full text-red-300 text-[11px] font-bold py-2">刪除此客戶</button>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="showEventModal" class="fixed inset-0 z-[60] bg-[#5D4037]/40 backdrop-blur-sm flex items-center justify-center p-6">
+            <div class="bg-white w-full rounded-[40px] p-8 shadow-2xl space-y-5 border-2 border-[#E6D5B8]">
+                <h3 class="font-black text-lg text-center">📔 預約新行程</h3>
+                <input v-model="newEvent.title" placeholder="事項 (如: 方案解說)" class="w-full p-4 bg-stone-50 rounded-2xl text-sm outline-none">
+                <div class="flex gap-2">
+                    <input type="time" v-model="newEvent.time" class="flex-1 p-4 bg-stone-50 rounded-2xl text-sm">
+                    <input type="number" v-model.number="newEvent.day" placeholder="日期" class="w-20 p-4 bg-stone-50 rounded-2xl text-sm">
+                </div>
+                
+                <div class="relative">
+                    <p class="text-[10px] font-bold text-stone-400 mb-2 px-1">關聯客戶</p>
+                    <input v-model="clientSearch" type="text" class="w-full p-4 bg-[#FAF7F2] rounded-2xl text-sm border border-[#E6D5B8]/30" placeholder="搜尋客戶名稱...">
+                    <div v-if="clientSearch" class="absolute z-10 w-full bg-white border rounded-2xl mt-2 shadow-xl max-h-40 overflow-y-auto p-2">
+                        <div v-for="c in filteredSearchClients" @click="selectClientForEvent(c)" class="p-3 text-xs font-bold hover:bg-[#FAF7F2] rounded-xl border-b border-stone-50 last:border-0">{{c.name}}</div>
+                    </div>
+                </div>
+                <div v-if="newEvent.clientName" class="bg-[#F8E8E8] p-2 rounded-xl text-center text-[10px] font-bold text-[#D4A5A5]">已選定客戶: {{newEvent.clientName}}</div>
+
+                <div class="flex gap-3 pt-2">
+                    <button @click="showEventModal = false" class="flex-1 py-4 font-black text-stone-300 text-sm">取消</button>
+                    <button @click="saveEvent" class="flex-1 bg-[#B8977E] text-white py-4 rounded-[20px] font-black text-sm cute-btn">確認預約</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, computed, watch, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                const currentTab = ref('home');
+                const tabNames = { home: 'Planner', clients: 'Member', stats: 'Stats' };
+                
+                // 1. 業績數據 (從 0 開始)
+                const monthlyGoal = ref(88000);
+                const earnedCommission = ref(0);
+                const totalRevenue = ref(0);
+                const totalDeals = ref(0);
+                const totalMeetings = ref(0);
+                
+                const remainingGoal = computed(() => Math.max(0, monthlyGoal.value - earnedCommission.value));
+                const formattedMonth = computed(() => new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date()));
+
+                // 2. 客戶
+                const clients = ref([]);
+                const searchQuery = ref('');
+                const showClientModal = ref(false);
+                const editingClient = ref({});
+                const dealAmount = ref(null);
+                const dealRate = ref(10);
+
+                // 3. 行程
+                const selectedDate = ref(new Date().getDate());
+                const showEventModal = ref(false);
+                const events = ref([]);
+                const newEvent = ref({ title: '', time: '14:00', day: new Date().getDate(), clientName: '', clientId: null });
+                const clientSearch = ref('');
+
+                const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+                const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getDay();
+
+                const filteredClients = computed(() => {
+                    const q = searchQuery.value.toLowerCase();
+                    return clients.value.filter(c => c.name.toLowerCase().includes(q) || (c.phone && c.phone.includes(q)));
+                });
+
+                const filteredSearchClients = computed(() => {
+                    if (!clientSearch.value) return [];
+                    return clients.value.filter(c => c.name.includes(clientSearch.value)).slice(0, 5);
+                });
+
+                const getEventsByDate = computed(() => {
+                    return events.value.filter(e => e.day === selectedDate.value).sort((a,b) => a.time.localeCompare(b.time));
+                });
+
+                const closeRate = computed(() => {
+                    if (totalMeetings.value === 0) return 0;
+                    return Math.round((totalDeals.value / totalMeetings.value) * 100);
+                });
+
+                const openClientModal = (client = null) => {
+                    editingClient.value = client ? { ...client } : { name: '', age: '', gender: '', phone: '', background: '', photo: null };
+                    showClientModal.value = true;
+                    dealAmount.value = null;
+                };
+
+                const uploadPhoto = (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (ev) => editingClient.value.photo = ev.target.result;
+                        reader.readAsDataURL(file);
+                    }
+                };
+
+                const saveClient = () => {
+                    if (!editingClient.value.name) return;
+                    if (editingClient.value.id) {
+                        const index = clients.value.findIndex(c => c.id === editingClient.value.id);
+                        clients.value[index] = { ...editingClient.value };
+                    } else {
+                        editingClient.value.id = Date.now();
+                        clients.value.push({ ...editingClient.value });
+                    }
+                    saveStorage();
+                    showClientModal.value = false;
+                };
+
+                const deleteClient = () => {
+                    if(confirm("確定刪除這位客戶嗎？")) {
+                        clients.value = clients.value.filter(c => c.id !== editingClient.value.id);
+                        saveStorage();
+                        showClientModal.value = false;
+                    }
+                };
+
+                const submitDeal = () => {
+                    if (!dealAmount.value) return;
+                    const commission = dealAmount.value * (dealRate.value / 100);
+                    
+                    const oldMilestone = Math.floor(earnedCommission.value / 10000);
+                    earnedCommission.value += commission;
+                    totalRevenue.value += dealAmount.value;
+                    totalDeals.value += 1;
+                    
+                    const newMilestone = Math.floor(earnedCommission.value / 10000);
+                    if (newMilestone > oldMilestone) {
+                        confetti({ 
+                            particleCount: 100, 
+                            spread: 60, 
+                            origin: { y: 0.7 },
+                            colors: ['#B8977E', '#E6D5B8', '#F8E8E8']
+                        });
+                    }
+                    saveStorage();
+                    showClientModal.value = false;
+                };
+
+                const selectClientForEvent = (client) => {
+                    newEvent.value.clientName = client.name;
+                    newEvent.value.clientId = client.id;
+                    clientSearch.value = '';
+                };
+
+                const saveEvent = () => {
+                    if (!newEvent.value.title) return;
+                    events.value.push({ ...newEvent.value });
+                    totalMeetings.value += 1;
+                    saveStorage();
+                    showEventModal.value = false;
+                    newEvent.value = { title: '', time: '14:00', day: selectedDate.value, clientName: '', clientId: null };
+                };
+
+                const checkEvent = (day) => events.value.some(e => e.day === day);
+
+                const saveStorage = () => {
+                    const data = {
+                        monthlyGoal: monthlyGoal.value,
+                        earnedCommission: earnedCommission.value,
+                        totalRevenue: totalRevenue.value,
+                        totalDeals: totalDeals.value,
+                        totalMeetings: totalMeetings.value,
+                        clients: JSON.parse(JSON.stringify(clients.value)),
+                        events: events.value
+                    };
+                    localStorage.setItem('lady_boss_data', JSON.stringify(data));
+                };
+
+                const resetStats = () => {
+                    if(confirm("重置所有數據嗎？這將清除目前的業績記錄。")) {
+                        earnedCommission.value = 0; totalRevenue.value = 0; totalDeals.value = 0; totalMeetings.value = 0;
+                        saveStorage();
+                    }
+                }
+
+                onMounted(() => {
+                    const saved = localStorage.getItem('lady_boss_data');
+                    if (saved) {
+                        const d = JSON.parse(saved);
+                        monthlyGoal.value = d.monthlyGoal || 88000;
+                        earnedCommission.value = d.earnedCommission || 0;
+                        totalRevenue.value = d.totalRevenue || 0;
+                        totalDeals.value = d.totalDeals || 0;
+                        totalMeetings.value = d.totalMeetings || 0;
+                        clients.value = d.clients || [];
+                        events.value = d.events || [];
+                    }
+                });
+
+                return {
+                    currentTab, tabNames, formattedMonth,
+                    monthlyGoal, earnedCommission, remainingGoal,
+                    clients, searchQuery, filteredClients, showClientModal, editingClient, openClientModal, saveClient, deleteClient, uploadPhoto,
+                    dealAmount, dealRate, submitDeal,
+                    daysInMonth, firstDayOfMonth, selectedDate, checkEvent, getEventsByDate,
+                    showEventModal, newEvent, saveEvent, clientSearch, filteredSearchClients, selectClientForEvent,
+                    selectedYear: ref(2026), totalMeetings, totalRevenue, totalDeals, closeRate, resetStats
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
